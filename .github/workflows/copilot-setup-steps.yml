@@ -1,0 +1,67 @@
+name: "Copilot Rust setup"
+
+# 이 워크플로우는 Copilot Cloud Agent 세션 전에 러스트 도구체인을 설치합니다.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # 반드시 이 job 이름을 사용해야 Copilot이 인식합니다.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Cache Cargo registry and index
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust (rustup) and components
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup default stable
+          rustup component add rustfmt clippy rust-src || true
+          cargo install --force cargo-watch || true
+
+      - name: Try install rust-analyzer (prebuilt)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 다운로드 시도 — 실패해도 전체 setup이 중단되지 않도록 에러를 허용합니다.
+          RA_URL="https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz"
+          if curl --head --silent --fail "$RA_URL" >/dev/null 2>&1; then
+            curl -L "$RA_URL" -o /tmp/rust-analyzer.gz && gunzip -f /tmp/rust-analyzer.gz
+            chmod +x /tmp/rust-analyzer
+            sudo mv /tmp/rust-analyzer /usr/local/bin/rust-analyzer || true
+          else
+            echo "rust-analyzer release not reachable; skipping binary install"
+          fi
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          source "$HOME/.cargo/env"
+          rustc --version || true
+          cargo --version || true
+          rustfmt --version || true
+          cargo clippy --version || true
+
+      - name: List repo files (debug)
+        run: ls -la
